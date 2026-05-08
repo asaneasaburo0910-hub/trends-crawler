@@ -1,16 +1,14 @@
-from pytrends.request import TrendReq
+import requests
 import csv
 import os
 from datetime import datetime
-import time
 
 # ============================
 # 設定
 # ============================
-GEO = "JP"  # 日本
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY")  # GitHubのSecretsから自動取得
 OUTPUT_FILE = "trends.csv"
 
-# 調べるキーワードグループ（5個以内で1グループ）
 KEYWORD_GROUPS = [
     {
         "label": "エンタメ・ゲーム",
@@ -24,62 +22,79 @@ KEYWORD_GROUPS = [
 
 
 def fetch_trending_searches():
-    """今日の急上昇ワードを取得"""
-    pytrends = TrendReq(hl="ja-JP", tz=540)
+    """日本の急上昇ワードを取得"""
+    results = []
     try:
-        df = pytrends.trending_searches(pn="japan")
-        results = []
-        for i, row in enumerate(df[0].tolist()[:20], 1):
+        url = "https://serpapi.com/search"
+        params = {
+            "engine": "google_trends_trending_now",
+            "geo": "JP",
+            "api_key": SERPAPI_KEY,
+        }
+        res = requests.get(url, params=params, timeout=15)
+        data = res.json()
+
+        for i, item in enumerate(data.get("trending_searches", [])[:20], 1):
             results.append({
                 "type": "急上昇ワード",
                 "label": "総合",
-                "keyword": row,
-                "score": 20 - i + 1,  # 順位を逆数でスコア化
+                "keyword": item.get("query", ""),
+                "score": 20 - i + 1,
                 "rank": i,
                 "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             })
         print(f"✅ 急上昇ワード: {len(results)}件取得")
-        return results
+
     except Exception as e:
         print(f"❌ 急上昇ワード取得失敗: {e}")
-        return []
+
+    return results
 
 
-def fetch_interest_by_keyword(group):
+def fetch_keyword_interest(group):
     """キーワードグループの人気度を取得"""
-    pytrends = TrendReq(hl="ja-JP", tz=540)
     results = []
     try:
-        pytrends.build_payload(
-            group["keywords"],
-            cat=0,
-            timeframe="now 7-d",  # 直近7日間
-            geo=GEO,
-        )
-        df = pytrends.interest_over_time()
-        if df.empty:
+        url = "https://serpapi.com/search"
+        params = {
+            "engine": "google_trends",
+            "q": ",".join(group["keywords"]),
+            "geo": "JP",
+            "date": "now 7-d",
+            "api_key": SERPAPI_KEY,
+        }
+        res = requests.get(url, params=params, timeout=15)
+        data = res.json()
+
+        timeline = data.get("interest_over_time", {}).get("timeline_data", [])
+        if not timeline:
+            print(f"⚠️ {group['label']}: データなし")
             return results
 
         # 各キーワードの平均スコアを計算
-        for keyword in group["keywords"]:
-            if keyword in df.columns:
-                avg_score = int(df[keyword].mean())
-                results.append({
-                    "type": "キーワード人気度",
-                    "label": group["label"],
-                    "keyword": keyword,
-                    "score": avg_score,
-                    "rank": 0,  # 後でソート
-                    "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                })
+        scores = {kw: [] for kw in group["keywords"]}
+        for point in timeline:
+            for val in point.get("values", []):
+                kw = val.get("query")
+                if kw in scores:
+                    scores[kw].append(val.get("extracted_value", 0))
 
-        # スコア順にランク付け
+        for kw, vals in scores.items():
+            avg = int(sum(vals) / len(vals)) if vals else 0
+            results.append({
+                "type": "キーワード人気度",
+                "label": group["label"],
+                "keyword": kw,
+                "score": avg,
+                "rank": 0,
+                "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            })
+
         results.sort(key=lambda x: x["score"], reverse=True)
         for i, r in enumerate(results, 1):
             r["rank"] = i
 
         print(f"✅ {group['label']}: {len(results)}件取得")
-        time.sleep(2)  # APIへの負荷を減らすため少し待つ
 
     except Exception as e:
         print(f"❌ {group['label']} 取得失敗: {e}")
@@ -106,18 +121,15 @@ def main():
 
     all_results = []
 
-    # 急上昇ワード取得
     trending = fetch_trending_searches()
     all_results.extend(trending)
 
-    # キーワードグループごとの人気度取得
     for group in KEYWORD_GROUPS:
-        items = fetch_interest_by_keyword(group)
+        items = fetch_keyword_interest(group)
         all_results.extend(items)
 
     save_csv(all_results)
 
-    # 上位5件表示
     print("\n📊 急上昇ワード トップ5:")
     for item in [i for i in all_results if i["type"] == "急上昇ワード"][:5]:
         print(f"  {item['rank']}. {item['keyword']}")
