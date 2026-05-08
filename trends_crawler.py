@@ -1,6 +1,7 @@
 import requests
 import csv
 import os
+import time
 from datetime import datetime
 
 # ============================
@@ -28,7 +29,7 @@ def fetch_trending_searches():
         url = "https://serpapi.com/search"
         params = {
             "engine": "google_trends_trending_now",
-            "frequency": "daily",
+            "frequency": "realtime",  # realtime に変更
             "geo": "JP",
             "hl": "ja",
             "api_key": SERPAPI_KEY,
@@ -36,18 +37,17 @@ def fetch_trending_searches():
         res = requests.get(url, params=params, timeout=15)
         data = res.json()
 
-        searches = data.get("daily_searches", [])
-        if searches:
-            latest = searches[0].get("searches", [])
-            for i, item in enumerate(latest[:20], 1):
-                results.append({
-                    "type": "急上昇ワード",
-                    "label": "総合",
-                    "keyword": item.get("query", ""),
-                    "score": item.get("traffic", 0),
-                    "rank": i,
-                    "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                })
+        # realtimeは realtime_searches キーで返ってくる
+        searches = data.get("realtime_searches", [])
+        for i, item in enumerate(searches[:20], 1):
+            results.append({
+                "type": "急上昇ワード",
+                "label": "総合",
+                "keyword": item.get("title", item.get("query", "")),
+                "score": 20 - i + 1,
+                "rank": i,
+                "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            })
 
         print(f"✅ 急上昇ワード: {len(results)}件取得")
 
@@ -61,12 +61,15 @@ def fetch_keyword_interest(group):
     """キーワードグループの人気度を取得"""
     results = []
     try:
+        time.sleep(5)  # 429対策：リクエスト間に5秒待つ
         url = "https://serpapi.com/search"
         params = {
             "engine": "google_trends",
             "q": ",".join(group["keywords"]),
             "geo": "JP",
+            "hl": "ja",
             "date": "now 7-d",
+            "tz": "-540",
             "api_key": SERPAPI_KEY,
         }
         res = requests.get(url, params=params, timeout=15)
@@ -77,7 +80,6 @@ def fetch_keyword_interest(group):
             print(f"⚠️ {group['label']}: データなし")
             return results
 
-        # 各キーワードの平均スコアを計算
         scores = {kw: [] for kw in group["keywords"]}
         for point in timeline:
             for val in point.get("values", []):
