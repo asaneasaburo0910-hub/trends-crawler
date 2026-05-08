@@ -28,21 +28,27 @@ def fetch_trending_searches():
         url = "https://serpapi.com/search"
         params = {
             "engine": "google_trends_trending_now",
+            "frequency": "daily",
             "geo": "JP",
+            "hl": "ja",
             "api_key": SERPAPI_KEY,
         }
         res = requests.get(url, params=params, timeout=15)
         data = res.json()
 
-        for i, item in enumerate(data.get("trending_searches", [])[:20], 1):
-            results.append({
-                "type": "急上昇ワード",
-                "label": "総合",
-                "keyword": item.get("query", ""),
-                "score": 20 - i + 1,
-                "rank": i,
-                "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            })
+        searches = data.get("daily_searches", [])
+        if searches:
+            latest = searches[0].get("searches", [])
+            for i, item in enumerate(latest[:20], 1):
+                results.append({
+                    "type": "急上昇ワード",
+                    "label": "総合",
+                    "keyword": item.get("query", ""),
+                    "score": item.get("traffic", 0),
+                    "rank": i,
+                    "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                })
+
         print(f"✅ 急上昇ワード: {len(results)}件取得")
 
     except Exception as e:
