@@ -25,6 +25,8 @@ jobs:
         run: pip install pytrends
 
       - name: トレンド収集実行
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python trends_crawler.py
 
       - name: 結果を保存
